@@ -2,6 +2,7 @@ package triparclient_test
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -19,14 +20,24 @@ const (
 )
 
 type LongDataReader struct {
-	size int
-	at   int
+	size   int
+	at     int
+	failAt int
 }
 
 func NewLongDataReader(size int) *LongDataReader {
 	return &LongDataReader{
-		size: size,
-		at:   0,
+		size:   size,
+		at:     0,
+		failAt: -1,
+	}
+}
+
+func NewFailingLongDataReader(size int, failAt int) *LongDataReader {
+	return &LongDataReader{
+		size:   size,
+		at:     0,
+		failAt: failAt,
 	}
 }
 
@@ -38,6 +49,10 @@ func (r *LongDataReader) Read(p []byte) (n int, err error) {
 	for n < len(p) && r.at < r.size {
 		p[n] = byte(r.at % 10)
 		r.at++
+		if r.at == r.failAt {
+			err = errors.New("You wanted this to fail.")
+			return
+		}
 		n++
 	}
 	if r.at >= r.size {
@@ -175,6 +190,16 @@ var _ = Describe("TriparClient", func() {
 				expected[i] = byte((2*1024*1024 + 71 + i) % 10)
 			}
 			Expect(fetched).To(Equal(expected))
+		})
+
+		It("should remove partially written objects after a failure", func() {
+			data := NewFailingLongDataReader(4*1024*1024+17, 2*1024*1024+101)
+			err := client.PutObject(root+"/large-object", data)
+			Expect(err).To(HaveOccurred())
+
+			_, err = client.Stat(root + "/large-object")
+			Expect(err).To(HaveOccurred())
+			Expect(err).To(Equal(triparclient.ERR_NOT_FOUND))
 		})
 
 	})
