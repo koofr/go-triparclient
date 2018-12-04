@@ -302,3 +302,40 @@ func (tp *TriparClient) DeleteObject(path string) (err error) {
 	err = tp.unmarshalTriparError(rsp)
 	return
 }
+
+func (tp *TriparClient) MoveObject(path string, nupath string) (err error) {
+	params := tp.cmd("mv")
+	params.Set("destination", nupath)
+	rsp, err := tp.request(&httpclient.RequestData{
+		Method:         "POST",
+		Path:           tp.path(path),
+		Params:         params,
+		ExpectedStatus: []int{http.StatusOK},
+	})
+
+	if err != nil {
+		return
+	}
+
+	err = tp.unmarshalTriparError(rsp)
+	return
+}
+
+func (tp *TriparClient) CopyObject(path string, nupath string) (err error) {
+	params := tp.cmd("cp")
+	params.Set("destination", nupath)
+	params.Set("overwrite", "true")
+	rsp, err := tp.request(&httpclient.RequestData{
+		Method:         "PUT",
+		Path:           tp.path(path),
+		Params:         params,
+		ExpectedStatus: []int{http.StatusOK},
+	})
+
+	if err != nil {
+		return
+	}
+
+	err = tp.unmarshalTriparError(rsp)
+	return
+}
