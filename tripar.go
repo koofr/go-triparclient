@@ -219,41 +219,73 @@ func (tp *TriparClient) GetObject(path string, span *ioutils.FileSpan) (rd io.Re
 	}
 }
 
-func (tp *TriparClient) PutObject(path string, reader io.Reader) (err error) {
-	buf := tp.bufferPool.Get()
-	defer tp.bufferPool.Put(buf)
+type PutPiece struct {
+	Buffer []byte
+	Read   int
+	Err    error
+}
 
+func (tp *TriparClient) PutObject(path string, reader io.Reader) (err error) {
+	pipe := make(chan *PutPiece, 1)
+	go func() {
+		for {
+			piece := &PutPiece{
+				Buffer: tp.bufferPool.Get(),
+				Read:   0,
+				Err:    nil,
+			}
+			piece.Read, piece.Err = reader.Read(piece.Buffer)
+			pipe <- piece
+			if piece.Err != nil {
+				break
+			}
+		}
+	}()
 	written := 0
-	n, rerr := reader.Read(buf)
-	for ; n > 0; n, rerr = reader.Read(buf) {
-		req := &httpclient.RequestData{
-			Path:             tp.path(path),
-			ExpectedStatus:   []int{http.StatusOK, http.StatusCreated},
-			ReqReader:        bytes.NewReader(buf[:n]),
-			ReqContentLength: int64(n),
+	defer func() {
+		if err != nil {
+			tp.DeleteObject(path)
 		}
-		if written == 0 {
-			req.Method = "PUT"
+	}()
+	for {
+		piece := <-pipe
+		if piece.Read > 0 {
+			req := &httpclient.RequestData{
+				Path:             tp.path(path),
+				ExpectedStatus:   []int{http.StatusOK, http.StatusCreated},
+				ReqReader:        bytes.NewReader(piece.Buffer[:piece.Read]),
+				ReqContentLength: int64(piece.Read),
+			}
+			if written == 0 {
+				req.Method = "PUT"
+			} else {
+				req.Method = "POST"
+				req.Headers = make(http.Header)
+				req.Headers.Set("Range", fmt.Sprintf("bytes=%d-%d", written, written+piece.Read-1))
+			}
+			rsp, werr := tp.request(req)
+			tp.bufferPool.Put(piece.Buffer)
+			if werr != nil {
+				err = werr
+				break
+			}
+			werr = tp.unmarshalTriparError(rsp)
+			if werr != nil {
+				err = werr
+				break
+			}
+			written += piece.Read
 		} else {
-			req.Method = "POST"
-			req.Headers = make(http.Header)
-			req.Headers.Set("Range", fmt.Sprintf("bytes=%d-%d", written, written+n-1))
+			tp.bufferPool.Put(piece.Buffer)
 		}
-		rsp, err := tp.request(req)
-		if err != nil {
-			return err
+		if piece.Err != nil {
+			if piece.Err != io.EOF {
+				err = piece.Err
+			}
+			break
 		}
-		err = tp.unmarshalTriparError(rsp)
-		if err != nil {
-			return err
-		}
-		written += n
 	}
-	if rerr == io.EOF {
-		return nil
-	} else {
-		return rerr
-	}
+	return
 }
 
 func (tp *TriparClient) DeleteObject(path string) (err error) {
