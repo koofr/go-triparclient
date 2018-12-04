@@ -265,4 +265,98 @@ var _ = Describe("TriparClient", func() {
 			Expect(err).To(HaveOccurred())
 		})
 	})
+
+	Describe("MoveObject", func() {
+		It("should move an object", func() {
+			err := client.PutObject(root+"/object", bytes.NewBufferString("12345"))
+			Expect(err).NotTo(HaveOccurred())
+
+			info, err := client.Stat(root + "/object")
+			Expect(err).NotTo(HaveOccurred())
+
+			err = client.MoveObject(root+"/object", root+"/object2")
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = client.Stat(root + "/object")
+			Expect(err).To(HaveOccurred())
+
+			info2, err := client.Stat(root + "/object2")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(info.Status.Size).To(Equal(info2.Status.Size))
+		})
+
+		It("should not move an inexistent object", func() {
+			err := client.MoveObject(root+"/object-inexisting", root+"/object-inexisting-2")
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should move over an existing object", func() {
+			err := client.PutObject(root+"/object", bytes.NewBufferString("12345"))
+			Expect(err).NotTo(HaveOccurred())
+			err = client.PutObject(root+"/object2", bytes.NewBufferString("123456"))
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = client.Stat(root + "/object")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = client.Stat(root + "/object2")
+			Expect(err).NotTo(HaveOccurred())
+
+			err = client.MoveObject(root+"/object", root+"/object2")
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = client.Stat(root + "/object")
+			Expect(err).To(HaveOccurred())
+			info, err := client.Stat(root + "/object2")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(info.Status.Size).To(Equal(int64(5)))
+		})
+	})
+
+	Describe("CopyObject", func() {
+		It("should copy an object", func() {
+			err := client.PutObject(root+"/object", bytes.NewBufferString("12345"))
+			Expect(err).NotTo(HaveOccurred())
+
+			info, err := client.Stat(root + "/object")
+			Expect(err).NotTo(HaveOccurred())
+
+			err = client.CopyObject(root+"/object", root+"/object2")
+			Expect(err).NotTo(HaveOccurred())
+
+			info, err = client.Stat(root + "/object")
+			Expect(err).NotTo(HaveOccurred())
+
+			info2, err := client.Stat(root + "/object2")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(info.Status.Size).To(Equal(info2.Status.Size))
+		})
+
+		It("should not copy an inexistent object", func() {
+			err := client.CopyObject(root+"/object-inexisting", root+"/object-inexisting-2")
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("should copy over an existing object", func() {
+			err := client.PutObject(root+"/object", bytes.NewBufferString("12345"))
+			Expect(err).NotTo(HaveOccurred())
+			err = client.PutObject(root+"/object2", bytes.NewBufferString("123456"))
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = client.Stat(root + "/object")
+			Expect(err).NotTo(HaveOccurred())
+			_, err = client.Stat(root + "/object2")
+			Expect(err).NotTo(HaveOccurred())
+
+			err = client.CopyObject(root+"/object", root+"/object2")
+			Expect(err).NotTo(HaveOccurred())
+
+			info, err := client.Stat(root + "/object")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(info.Status.Size).To(Equal(int64(5)))
+			info, err = client.Stat(root + "/object2")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(info.Status.Size).To(Equal(int64(5)))
+		})
+	})
+
 })
