@@ -174,6 +174,24 @@ func (tp *TriparClient) CreateDirectory(path string) (err error) {
 	return
 }
 
+func (tp *TriparClient) CreateDirectories(path string) (err error) {
+	params := tp.cmd("mkdir")
+	params.Set("parents", "true")
+	rsp, err := tp.request(&httpclient.RequestData{
+		Method:         "PUT",
+		Path:           tp.path(path),
+		Params:         params,
+		ExpectedStatus: []int{http.StatusOK},
+	})
+
+	if err != nil {
+		return
+	}
+
+	err = tp.unmarshalTriparError(rsp)
+	return
+}
+
 func (tp *TriparClient) List(path string) (entries Entries, err error) {
 	rsp, err := tp.request(&httpclient.RequestData{
 		Method:         "GET",
