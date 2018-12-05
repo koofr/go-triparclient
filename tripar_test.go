@@ -63,6 +63,35 @@ func (r *LongDataReader) Read(p []byte) (n int, err error) {
 	return
 }
 
+func purge(client *triparclient.TriparClient, path string) (err error) {
+	entries, err := client.List(path)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries.Entries {
+		info, err := client.Stat(path + "/" + entry.Name)
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			err = purge(client, path+"/"+entry.Name)
+			if err != nil {
+				return err
+			}
+			err = client.DeleteDirectory(path + "/" + entry.Name)
+			if err != nil {
+				return err
+			}
+		} else {
+			err = client.DeleteObject(path + "/" + entry.Name)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 var _ = Describe("TriparClient", func() {
 	var client *triparclient.TriparClient
 
@@ -85,20 +114,10 @@ var _ = Describe("TriparClient", func() {
 		client, err = triparclient.NewTriparClient(endpoint, user, pass, share, bp)
 		Expect(err).NotTo(HaveOccurred())
 
-		var entries triparclient.Entries
-
-		entries, err = client.List(root)
+		_, err = client.Stat(root)
 		if err == nil {
-			for _, entry := range entries.Entries {
-				info, err := client.Stat(root + "/" + entry.Name)
-				Expect(err).NotTo(HaveOccurred())
-				if info.IsDir() {
-					err = client.DeleteDirectory(root + "/" + entry.Name)
-				} else {
-					err = client.DeleteObject(root + "/" + entry.Name)
-				}
-				Expect(err).NotTo(HaveOccurred())
-			}
+			err = purge(client, root)
+			Expect(err).NotTo(HaveOccurred())
 		} else if err == triparclient.ERR_NOT_FOUND {
 			err = client.CreateDirectory(root)
 			Expect(err).NotTo(HaveOccurred())
@@ -238,6 +257,27 @@ var _ = Describe("TriparClient", func() {
 			err = client.CreateDirectory(root + "/subdir")
 			Expect(err).To(HaveOccurred())
 		})
+	})
+
+	Describe("CreateDirectories", func() {
+		It("should create a directory tree", func() {
+			err := client.CreateDirectories(root + "/subdir/subsubdir/subsubsubdir")
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = client.Stat(root + "/subdir/subsubdir/subsubsubdir")
+			Expect(err).NotTo(HaveOccurred())
+		})
+
+		It("should create a directory tree when it partially exists", func() {
+			err := client.CreateDirectory(root + "/subdir")
+			Expect(err).NotTo(HaveOccurred())
+			err = client.CreateDirectories(root + "/subdir/subsubdir/subsubsubdir")
+			Expect(err).NotTo(HaveOccurred())
+
+			_, err = client.Stat(root + "/subdir/subsubdir/subsubsubdir")
+			Expect(err).NotTo(HaveOccurred())
+		})
+
 	})
 
 	Describe("DeleteDirectory", func() {
