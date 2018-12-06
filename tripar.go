@@ -252,7 +252,9 @@ func (tp *TriparClient) PutObject(path string, reader io.Reader) (err error) {
 				Read:   0,
 				Err:    nil,
 			}
-			piece.Read, piece.Err = reader.Read(piece.Buffer)
+			/* use read full so that we minimise number of writes, as the
+			   latency of PUT/POST requests negatively impacts performance */
+			piece.Read, piece.Err = io.ReadFull(reader, piece.Buffer)
 			pipe <- piece
 			if piece.Err != nil {
 				break
@@ -297,7 +299,7 @@ func (tp *TriparClient) PutObject(path string, reader io.Reader) (err error) {
 			tp.bufferPool.Put(piece.Buffer)
 		}
 		if piece.Err != nil {
-			if piece.Err != io.EOF {
+			if piece.Err != io.EOF && piece.Err != io.ErrUnexpectedEOF {
 				err = piece.Err
 			}
 			break
