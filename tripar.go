@@ -275,6 +275,12 @@ func (tp *TriparClient) PutObject(path string, reader io.Reader) (err error) {
 			if piece.Err != nil {
 				break
 			}
+			if err != nil {
+				/* err is set on write error. drop reading, signal writer by
+				closing chan */
+				close(pipe)
+				break
+			}
 		}
 	}()
 	written := 0
@@ -284,8 +290,13 @@ func (tp *TriparClient) PutObject(path string, reader io.Reader) (err error) {
 		}
 	}()
 	for {
-		piece := <-pipe
-		if piece.Read > 0 {
+		piece, ok := <-pipe
+		if !ok {
+			/* by design, err is non-nil here, channel was closed due to
+			write error which set err */
+			break
+		}
+		if err == nil && piece.Read > 0 {
 			req := &httpclient.RequestData{
 				Path:             tp.path(path),
 				ExpectedStatus:   []int{http.StatusOK, http.StatusCreated},
@@ -303,19 +314,19 @@ func (tp *TriparClient) PutObject(path string, reader io.Reader) (err error) {
 			tp.bufferPool.Put(piece.Buffer)
 			if werr != nil {
 				err = werr
-				break
+				continue
 			}
 			werr = tp.unmarshalTriparError(rsp)
 			if werr != nil {
 				err = werr
-				break
+				continue
 			}
 			written += piece.Read
 		} else {
 			tp.bufferPool.Put(piece.Buffer)
 		}
 		if piece.Err != nil {
-			if piece.Err != io.EOF && piece.Err != io.ErrUnexpectedEOF {
+			if err == nil && piece.Err != io.EOF && piece.Err != io.ErrUnexpectedEOF {
 				err = piece.Err
 			}
 			break
