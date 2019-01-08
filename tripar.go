@@ -243,6 +243,22 @@ type PutPiece struct {
 	Err    error
 }
 
+func (tp *TriparClient) Fsync(path string) (err error) {
+	rsp, err := tp.request(&httpclient.RequestData{
+		Method:         "POST",
+		Path:           tp.path(path),
+		Params:         tp.cmd("fsync"),
+		ExpectedStatus: []int{http.StatusOK},
+	})
+
+	if err != nil {
+		return
+	}
+
+	err = tp.unmarshalTriparError(rsp)
+	return
+}
+
 func (tp *TriparClient) PutObject(path string, reader io.Reader) (err error) {
 	pipe := make(chan *PutPiece, 1)
 	go func() {
