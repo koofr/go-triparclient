@@ -177,6 +177,22 @@ var _ = Describe("TriparClient", func() {
 		})
 	})
 
+	Describe("Fsync", func() {
+		It("should put commit data to disk", func() {
+			data := bytes.NewBufferString("12345")
+			err := client.PutObject(root+"/new-object", data)
+			Expect(err).NotTo(HaveOccurred())
+
+			object, err := client.Stat(root + "/new-object")
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(object.Status.Size).To(Equal(int64(5)))
+
+			err = client.Fsync(root + "/new-object")
+			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
 	Describe("PutObject", func() {
 		It("should put object", func() {
 			data := bytes.NewBufferString("12345")
