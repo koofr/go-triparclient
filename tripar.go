@@ -296,7 +296,7 @@ func (tp *TriparClient) PutObject(path string, reader io.Reader) (err error) {
 			write error which set err */
 			break
 		}
-		if err == nil && piece.Read > 0 {
+		if err == nil && (piece.Read > 0 || (piece.Read == 0 && written == 0)) {
 			req := &httpclient.RequestData{
 				Path:             tp.path(path),
 				ExpectedStatus:   []int{http.StatusOK, http.StatusCreated},
