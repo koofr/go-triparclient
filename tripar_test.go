@@ -17,6 +17,7 @@ import (
 const (
 	TRIPAR_MAX_BUFFERS = 1024
 	TRIPAR_BUFFER_SIZE = 1024 * 1024
+	TRIPAR_GET_SIZE    = 1024 * 1024
 )
 
 type LongDataReader struct {
@@ -111,7 +112,7 @@ var _ = Describe("TriparClient", func() {
 	BeforeEach(func() {
 		var err error
 
-		client, err = triparclient.NewTriparClient(endpoint, user, pass, share, bp)
+		client, err = triparclient.NewTriparClient(endpoint, user, pass, share, bp, TRIPAR_GET_SIZE)
 		Expect(err).NotTo(HaveOccurred())
 
 		_, err = client.Stat(root)
@@ -129,8 +130,9 @@ var _ = Describe("TriparClient", func() {
 			err := client.PutObject(root+"/object", bytes.NewBufferString("12345"))
 			Expect(err).NotTo(HaveOccurred())
 
-			reader, err := client.GetObject(root+"/object", nil)
+			reader, stat, err := client.GetObject(root+"/object", nil)
 			Expect(err).NotTo(HaveOccurred())
+			Expect(stat.Status.Size).To(Equal(int64(5)))
 
 			defer reader.Close()
 
@@ -143,7 +145,7 @@ var _ = Describe("TriparClient", func() {
 			err := client.PutObject(root+"/object", bytes.NewBufferString("12345"))
 			Expect(err).NotTo(HaveOccurred())
 
-			reader, err := client.GetObject(root+"/object", &ioutils.FileSpan{2, 3})
+			reader, _, err := client.GetObject(root+"/object", &ioutils.FileSpan{2, 3})
 			Expect(err).NotTo(HaveOccurred())
 
 			defer reader.Close()
@@ -154,7 +156,7 @@ var _ = Describe("TriparClient", func() {
 		})
 
 		It("should not get inexisting object", func() {
-			_, err := client.GetObject(root+"/object-inexisting", nil)
+			_, _, err := client.GetObject(root+"/object-inexisting", nil)
 			Expect(err).To(HaveOccurred())
 		})
 	})
@@ -214,15 +216,16 @@ var _ = Describe("TriparClient", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(info.Status.Size).To(Equal(int64(4*1024*1024 + 17)))
 
-			reader, err := client.GetObject(root+"/large-object", &ioutils.FileSpan{2*1024*1024 + 71, 2*1024*1024 + 71 + 23 - 1})
+			reader, stat, err := client.GetObject(root+"/large-object", &ioutils.FileSpan{2*1024*1024 - 71, 2*1024*1024 - 71 + 142 - 1})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(stat.Status.Size).To(Equal(int64(4*1024*1024 + 17)))
 
 			defer reader.Close()
 
 			fetched, _ := ioutil.ReadAll(reader)
-			expected := make([]byte, 23)
-			for i := 0; i < 23; i++ {
-				expected[i] = byte((2*1024*1024 + 71 + i) % 10)
+			expected := make([]byte, 142)
+			for i := 0; i < 142; i++ {
+				expected[i] = byte((2*1024*1024 - 71 + i) % 10)
 			}
 			Expect(fetched).To(Equal(expected))
 		})

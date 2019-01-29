@@ -10,6 +10,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	httpclient "github.com/koofr/go-httpclient"
@@ -20,12 +21,14 @@ var (
 	ERR_NOT_FOUND      = errors.New("NotFound")
 	ERR_NOT_A_FILE     = errors.New("NotAFile")
 	ERR_ALREADY_EXISTS = errors.New("AlreadyExists")
+	ERR_BAD_RANGE      = errors.New("BadRange")
 	ERR_OTHER          = errors.New("Wtf")
 )
 
 type TriparClient struct {
-	HTTPClient *httpclient.HTTPClient
-	bufferPool *BufferPool
+	HTTPClient   *httpclient.HTTPClient
+	bufferPool   *BufferPool
+	getChunkSize int64
 }
 
 func basicAuth(user string, pass string) string {
@@ -40,12 +43,14 @@ func translateError(err Error) error {
 		return ERR_ALREADY_EXISTS
 	case 21:
 		return ERR_NOT_A_FILE
+	case 10004:
+		return ERR_BAD_RANGE
 	default:
 		return err
 	}
 }
 
-func NewTriparClient(endpoint string, user string, pass string, share string, bp *BufferPool) (tp *TriparClient, err error) {
+func NewTriparClient(endpoint string, user string, pass string, share string, bp *BufferPool, getChunkSize int64) (tp *TriparClient, err error) {
 	if share != "" {
 		if !strings.HasSuffix(endpoint, "/") {
 			endpoint += "/"
@@ -64,8 +69,9 @@ func NewTriparClient(endpoint string, user string, pass string, share string, bp
 	client.Headers.Set("Authorization", basicAuth(user, pass))
 
 	tp = &TriparClient{
-		HTTPClient: client,
-		bufferPool: bp,
+		HTTPClient:   client,
+		bufferPool:   bp,
+		getChunkSize: getChunkSize,
 	}
 
 	return
@@ -208,33 +214,72 @@ func (tp *TriparClient) List(path string) (entries Entries, err error) {
 	return
 }
 
-func (tp *TriparClient) GetObject(path string, span *ioutils.FileSpan) (rd io.ReadCloser, err error) {
-	req := httpclient.RequestData{
-		Method:         "GET",
-		Path:           tp.path(path),
-		ExpectedStatus: []int{http.StatusOK, http.StatusPartialContent},
-	}
-
-	if span != nil {
-		req.Headers = make(http.Header)
-		req.Headers.Set("Range", fmt.Sprintf("bytes=%d-%d", span.Start, span.End))
-	}
-
-	rsp, err := tp.request(&req)
-
+func (tp *TriparClient) GetObject(path string, span *ioutils.FileSpan) (rd io.ReadCloser, info *Stat, err error) {
+	stat, err := tp.Stat(path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	ctype := rsp.Header.Get("Content-Type")
-	if strings.HasPrefix(ctype, "application/octet-stream") {
-		return rsp.Body, nil
-	} else {
-		err = tp.unmarshalTriparError(rsp)
-		if err != nil {
-			err = ERR_OTHER
+
+	/* NOTE: we will fetch files in chunks, as Object Access API implementation
+	   seems to have a problem with (a) large files and (b) large ranges. fuck
+	   HPE. */
+
+	left := stat.Status.Size
+	start := int64(0)
+	if span != nil {
+		left = span.End - span.Start
+		start = span.Start
+	}
+
+	if left-start > stat.Status.Size || start < 0 || left < 0 {
+		return nil, nil, ERR_BAD_RANGE
+	}
+
+	r, w := io.Pipe()
+	go func() {
+		for left > 0 {
+			req := httpclient.RequestData{
+				Method:         "GET",
+				Path:           tp.path(path),
+				ExpectedStatus: []int{http.StatusOK, http.StatusPartialContent},
+			}
+			len := left
+			if len > tp.getChunkSize {
+				len = tp.getChunkSize
+			}
+			req.Headers = make(http.Header)
+			req.Headers.Set("Range", fmt.Sprintf("bytes=%d-%d", start, start+len))
+			rsp, err := tp.request(&req)
+			if err != nil {
+				w.CloseWithError(err)
+				return
+			}
+
+			ctype := rsp.Header.Get("Content-Type")
+			if strings.HasPrefix(ctype, "application/octet-stream") {
+				rlens := rsp.Header.Get("Content-Length")
+				rlen, err := strconv.ParseInt(rlens, 10, 64)
+				if err != nil {
+					w.CloseWithError(ERR_OTHER)
+					return
+				}
+				left -= rlen
+				start += rlen
+				io.Copy(w, rsp.Body)
+				rsp.Body.Close()
+			} else {
+				err = tp.unmarshalTriparError(rsp)
+				if err != nil {
+					err = ERR_OTHER
+				}
+				w.CloseWithError(err)
+				return
+			}
 		}
-		return nil, err
-	}
+		w.Close()
+	}()
+
+	return r, &stat, nil
 }
 
 type PutPiece struct {
