@@ -96,6 +96,7 @@ func (tp *TriparClient) cmd(cmd string) (params url.Values) {
 
 func (tp *TriparClient) unmarshalTriparError(r *http.Response) (err error) {
 	body, err := ioutil.ReadAll(r.Body)
+	r.Body.Close()
 
 	if err != nil {
 		return
@@ -117,6 +118,7 @@ func (tp *TriparClient) unmarshalTriparError(r *http.Response) (err error) {
 func (tp *TriparClient) unmarshalTriparResponse(r *http.Response,
 	i interface{}) (err error) {
 	body, err := ioutil.ReadAll(r.Body)
+	r.Body.Close()
 
 	if err != nil {
 		return
@@ -227,7 +229,7 @@ func (tp *TriparClient) GetObject(path string, span *ioutils.FileSpan) (rd io.Re
 	left := stat.Status.Size
 	start := int64(0)
 	if span != nil {
-		left = span.End - span.Start
+		left = span.End - span.Start + 1
 		start = span.Start
 	}
 
@@ -248,7 +250,7 @@ func (tp *TriparClient) GetObject(path string, span *ioutils.FileSpan) (rd io.Re
 				len = tp.getChunkSize
 			}
 			req.Headers = make(http.Header)
-			req.Headers.Set("Range", fmt.Sprintf("bytes=%d-%d", start, start+len))
+			req.Headers.Set("Range", fmt.Sprintf("bytes=%d-%d", start, start+len-1))
 			rsp, err := tp.request(&req)
 			if err != nil {
 				w.CloseWithError(err)
@@ -260,13 +262,22 @@ func (tp *TriparClient) GetObject(path string, span *ioutils.FileSpan) (rd io.Re
 				rlens := rsp.Header.Get("Content-Length")
 				rlen, err := strconv.ParseInt(rlens, 10, 64)
 				if err != nil {
+					rsp.Body.Close()
 					w.CloseWithError(ERR_OTHER)
 					return
 				}
 				left -= rlen
 				start += rlen
-				io.Copy(w, rsp.Body)
+				n, err := io.Copy(w, rsp.Body)
 				rsp.Body.Close()
+				if err != nil {
+					w.CloseWithError(err)
+					return
+				}
+				if n != rlen {
+					w.CloseWithError(ERR_OTHER)
+					return
+				}
 			} else {
 				err = tp.unmarshalTriparError(rsp)
 				if err != nil {
