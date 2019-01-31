@@ -217,6 +217,46 @@ func (tp *TriparClient) List(path string) (entries Entries, err error) {
 }
 
 func (tp *TriparClient) GetObject(path string, span *ioutils.FileSpan) (rd io.ReadCloser, info *Stat, err error) {
+	if span == nil || span.End-span.Start <= tp.getChunkSize {
+		return tp.getObjectComplete(path, span)
+	} else {
+		return tp.getObjectByChunks(path, span)
+	}
+}
+
+func (tp *TriparClient) getObjectComplete(path string, span *ioutils.FileSpan) (rd io.ReadCloser, info *Stat, err error) {
+	stat, err := tp.Stat(path)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	req := httpclient.RequestData{
+		Method:         "GET",
+		Path:           tp.path(path),
+		ExpectedStatus: []int{http.StatusOK, http.StatusPartialContent},
+	}
+	if span != nil {
+		req.Headers = make(http.Header)
+		req.Headers.Set("Range", fmt.Sprintf("bytes=%d-%d", span.Start, span.End))
+	}
+	rsp, err := tp.request(&req)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	ctype := rsp.Header.Get("Content-Type")
+	if strings.HasPrefix(ctype, "application/octet-stream") {
+		return rsp.Body, &stat, nil
+	} else {
+		err = tp.unmarshalTriparError(rsp)
+		if err != nil {
+			err = ERR_OTHER
+		}
+		return nil, nil, err
+	}
+}
+
+func (tp *TriparClient) getObjectByChunks(path string, span *ioutils.FileSpan) (rd io.ReadCloser, info *Stat, err error) {
 	stat, err := tp.Stat(path)
 	if err != nil {
 		return nil, nil, err
@@ -233,7 +273,7 @@ func (tp *TriparClient) GetObject(path string, span *ioutils.FileSpan) (rd io.Re
 		start = span.Start
 	}
 
-	if left-start > stat.Status.Size || start < 0 || left < 0 {
+	if left-start > stat.Status.Size || start < 0 || left <= 0 {
 		return nil, nil, ERR_BAD_RANGE
 	}
 
