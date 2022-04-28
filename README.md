@@ -20,3 +20,9 @@ go get github.com/koofr/go-triparclient
 ```sh
 go test
 ```
+
+Coverage:
+
+```sh
+go test --coverprofile=go-triparclient.coverprofile && go tool cover -html=go-triparclient.coverprofile
+```
