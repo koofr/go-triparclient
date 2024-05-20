@@ -13,7 +13,7 @@ import (
 	"sync/atomic"
 
 	ioutils "github.com/koofr/go-ioutils"
-	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/v2/dsl/core"
 	. "github.com/onsi/gomega"
 
 	. "github.com/koofr/go-triparclient"
